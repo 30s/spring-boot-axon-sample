@@ -1,6 +1,6 @@
 Introduction
 ============
-This is a sample application to demonstrate Spring Boot, ElasticSearch and Axon Framework.
+This is a sample application to demonstrate Spring Boot and Axon Framework. This project will use the following backing services: Postgres, RabbitMQ, ElasticSearch
 
 The Todo application makes use of the following design patterns:
 - Domain Driven Design
@@ -21,8 +21,10 @@ Browse to http://localhost:8080/index.html
 Implementation
 ==============
 Implementation notes:
-- The event store is backed by a filesystem implementation which comes with Axon
-- The query model is backed by a local ElasticSearch node (running in the same JVM) using Spring Data ElasticSearch
+- Commands and events are handled asynchronous
+- Event are dispatched to a RabbitMQ exchnage
+- The event store is backed by a JDBC Event Store storing events as JSON in Postgres
+- The query model is backed by a ElasticSearch using Spring Data ElasticSearch
 - The user interface is updated asynchronously via stompjs over websockets using Spring Websockets support
 
 Documentation
@@ -31,3 +33,4 @@ Documentation
 * Spring Boot - http://projects.spring.io/spring-boot/
 * Spring Framework - http://projects.spring.io/spring-framework/
 * Spring Data ElasticSearch - https://github.com/spring-projects/spring-data-elasticsearch
+* RabbitMQ - http://www.rabbitmq.com/
