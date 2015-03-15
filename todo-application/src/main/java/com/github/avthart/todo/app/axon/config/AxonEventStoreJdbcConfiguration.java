@@ -37,15 +37,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.introspect.AnnotationIntrospectorPair;
 import com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector;
+import com.github.avthart.todo.app.axon.postgres.PostgresJsonEventSqlSchema;
 import com.github.avthart.todo.app.support.ConstructorPropertiesAnnotationIntrospector;
 
 @Configuration
 @ConditionalOnClass({ EventSourcedAggregateRoot.class, EnableTransactionManagement.class })
 @ConditionalOnExpression("${axon.eventstore.jdbc.enabled:true}")
 @AutoConfigureAfter(DataSourceAutoConfiguration.class)
-public class AxonEventStoreJdbcAutoConfiguration {
+public class AxonEventStoreJdbcConfiguration {
     
-    private static final Logger LOGGER = LoggerFactory.getLogger(AxonEventStoreJdbcAutoConfiguration.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(AxonEventStoreJdbcConfiguration.class);
     
     @Autowired
     private EventBus eventBus;
@@ -71,7 +72,7 @@ public class AxonEventStoreJdbcAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(EventSqlSchema.class)
     public EventSqlSchema<String> eventSqlSchema() {
-		return new PostgresJsonEventSqlSchema<String>(String.class);
+		return new PostgresJsonEventSqlSchema();
     }
     
     @JsonAutoDetect(
@@ -127,7 +128,7 @@ public class AxonEventStoreJdbcAutoConfiguration {
                 eventEntryStore.createSchema();
                 LOGGER.debug("EventStore schema created");
             } catch (EventStoreException e) {
-                LOGGER.warn("Error while creating eventStore schema (maybe already created?)", e);
+                LOGGER.warn("Error while creating eventStore schema (already created?): {}", e.getMessage());
             } catch (SQLException e) {
                 LOGGER.warn("SQL error while creating eventStore schema", e);
             }            

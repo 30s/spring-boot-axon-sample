@@ -52,9 +52,9 @@ import com.github.avthart.todo.app.support.ClassScanner;
 
 @Configuration
 @ConditionalOnClass({ AggregateRoot.class, Repository.class })
-public class AxonAutoConfiguration implements BeanFactoryAware {
+public class AxonConfiguration implements BeanFactoryAware {
 	
-    private static final Logger LOGGER = LoggerFactory.getLogger(AxonAutoConfiguration.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(AxonConfiguration.class);
     
     private ConfigurableListableBeanFactory beanFactory;
     
