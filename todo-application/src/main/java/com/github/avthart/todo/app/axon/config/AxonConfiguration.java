@@ -7,6 +7,8 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
+import lombok.extern.slf4j.Slf4j;
+
 import org.axonframework.commandhandling.CommandBus;
 import org.axonframework.commandhandling.CommandDispatchInterceptor;
 import org.axonframework.commandhandling.CommandHandlerInterceptor;
@@ -18,8 +20,17 @@ import org.axonframework.commandhandling.gateway.CommandGatewayFactoryBean;
 import org.axonframework.commandhandling.interceptors.BeanValidationInterceptor;
 import org.axonframework.commandhandling.interceptors.LoggingInterceptor;
 import org.axonframework.domain.AggregateRoot;
+import org.axonframework.domain.EventContainer;
+import org.axonframework.eventhandling.Cluster;
+import org.axonframework.eventhandling.ClusteringEventBus;
+import org.axonframework.eventhandling.DefaultClusterSelector;
 import org.axonframework.eventhandling.EventBus;
-import org.axonframework.eventhandling.SimpleEventBus;
+import org.axonframework.eventhandling.EventBusTerminal;
+import org.axonframework.eventhandling.SimpleCluster;
+import org.axonframework.eventhandling.SimpleClusterFactoryBean;
+import org.axonframework.eventhandling.amqp.spring.ListenerContainerLifecycleManager;
+import org.axonframework.eventhandling.amqp.spring.SpringAMQPConsumerConfiguration;
+import org.axonframework.eventhandling.amqp.spring.SpringAMQPTerminal;
 import org.axonframework.eventhandling.annotation.AnnotationEventListenerBeanPostProcessor;
 import org.axonframework.eventsourcing.AggregateFactory;
 import org.axonframework.eventsourcing.EventCountSnapshotterTrigger;
@@ -31,9 +42,15 @@ import org.axonframework.eventsourcing.SpringAggregateSnapshotter;
 import org.axonframework.eventstore.jdbc.JdbcEventStore;
 import org.axonframework.repository.AbstractRepository;
 import org.axonframework.repository.Repository;
+import org.axonframework.serializer.Serializer;
+import org.axonframework.serializer.json.JacksonSerializer;
 import org.axonframework.unitofwork.SpringTransactionManager;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.FanoutExchange;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.BeanFactoryAware;
@@ -46,17 +63,36 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.util.ErrorHandler;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.introspect.AnnotationIntrospectorPair;
+import com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector;
 import com.github.avthart.todo.app.axon.security.SecurityPrincipalMetadataEnrichingCommandDispatchInterceptor;
 import com.github.avthart.todo.app.support.ClassScanner;
+import com.github.avthart.todo.app.support.ConstructorPropertiesAnnotationIntrospector;
 
 @Configuration
 @ConditionalOnClass({ AggregateRoot.class, Repository.class })
+@Slf4j
 public class AxonConfiguration implements BeanFactoryAware {
-	
-    private static final Logger LOGGER = LoggerFactory.getLogger(AxonConfiguration.class);
     
     private ConfigurableListableBeanFactory beanFactory;
+    
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+    
+    @Autowired
+    private ConnectionFactory connectionFactory;
+    
+    @Autowired
+    private Serializer serializer;
     
     @Autowired
     private CommandBus commandBus;
@@ -100,12 +136,72 @@ public class AxonConfiguration implements BeanFactoryAware {
 	@Bean
 	@ConditionalOnMissingBean(EventBus.class)
 	public EventBus eventBus() {
-		return new SimpleEventBus();
+		return new ClusteringEventBus(new DefaultClusterSelector(cluster()), eventBusTerminal());
+	}
+
+	@Bean
+	Queue queue() {
+		return new Queue("Axon.EventBus.Default", false);
+	}
+
+	@Bean
+	FanoutExchange exchange() {
+		return new FanoutExchange("Axon.EventBus");
 	}
 	
 	@Bean
-	SpringTransactionManager springTransactionManager(PlatformTransactionManager platformTransactionManager) {
-		return new SpringTransactionManager(platformTransactionManager);
+	Binding binding() {
+		return BindingBuilder.bind(queue()).to(exchange());
+	}
+
+	@Bean
+	EventBusTerminal eventBusTerminal() {
+		SpringAMQPTerminal terminal = new SpringAMQPTerminal();
+		terminal.setConnectionFactory(connectionFactory);
+		terminal.setSerializer(serializer);
+		terminal.setExchange(exchange());
+		terminal.setListenerContainerLifecycleManager(listenerContainerLifecycleManager());
+		return terminal;
+	}
+	
+	@Bean
+	Cluster cluster() {
+		SimpleCluster cluster = new SimpleCluster("axon-cluster");
+		SpringAMQPConsumerConfiguration config = new SpringAMQPConsumerConfiguration();
+		config.setQueueName("Axon.EventBus.Default");
+		cluster.getMetaData().setProperty("AMQP.Config", config);
+		return cluster;
+	}
+	
+	@Bean
+	// TODO check config params..
+	SpringAMQPConsumerConfiguration amqpConsumerConfiguration() {
+		SpringAMQPConsumerConfiguration config = new SpringAMQPConsumerConfiguration();
+		config.setTransactionManager(transactionManager);
+		config.setTxSize(25);
+		config.setPrefetchCount(200);
+		config.setShutdownTimeout(10L);
+		config.setQueueName("Axon.EventBus.Default");
+		config.setErrorHandler(new ErrorHandler() {
+			@Override
+			public void handleError(Throwable error) {
+				log.error("Exception occured in Axon AMQP handler", error);
+			}
+		});
+		return config;
+	}
+	
+	@Bean
+	public ListenerContainerLifecycleManager listenerContainerLifecycleManager() {
+		ListenerContainerLifecycleManager manager = new ListenerContainerLifecycleManager();
+		manager.setDefaultConfiguration(amqpConsumerConfiguration());
+		manager.setConnectionFactory(connectionFactory);
+		return manager;
+	}
+
+	@Bean
+	SpringTransactionManager springTransactionManager() {
+		return new SpringTransactionManager(transactionManager);
 	}
 	
 	@Bean
@@ -153,10 +249,8 @@ public class AxonConfiguration implements BeanFactoryAware {
     @Bean
     public List<AbstractRepository<?>> repositories(@Value("#{aggregateRoots}")  Collection<Class<? extends EventSourcedAggregateRoot<?>>> aggregateRoots) {
 		ArrayList<AbstractRepository<?>> repositories = new ArrayList<AbstractRepository<?>>();
-
-
         for (Class<? extends EventSourcedAggregateRoot<?>> clazz : aggregateRoots) {
-            LOGGER.info("Created EventSourcing Repository for aggregate {}", clazz.getName());
+            log.info("Created EventSourcing Repository for aggregate {}", clazz.getName());
             @SuppressWarnings({ "unchecked", "rawtypes" })
 			EventSourcingRepository<?> repository = new EventSourcingRepository(clazz, getJdbcEventStore());
         	repository.setSnapshotterTrigger(snapshotterTrigger());
@@ -169,10 +263,9 @@ public class AxonConfiguration implements BeanFactoryAware {
             Set<?> commands = commandHandler.supportedCommands();
             for (Object commandName : commands) {
                 commandBus.subscribe(commandName.toString(), commandHandler);
-                LOGGER.info("Subscibed command handler {}", commandName.toString());
+                log.info("Subscibed command handler {}", commandName.toString());
             }
         }
-
         return repositories;
     }
 
@@ -204,13 +297,52 @@ public class AxonConfiguration implements BeanFactoryAware {
 		return snapshotter;
 	}
 	
-	 @Bean(destroyMethod="shutdown")
-	 public Executor executor() {
-		 return Executors.newScheduledThreadPool(5); // TODO make a shared executor make poolsize configurable.
-	 }
-    
+	@Bean(destroyMethod="shutdown")
+	public Executor executor() {
+		return Executors.newScheduledThreadPool(5); // TODO make a shared executor make poolsize configurable.
+	}
+	
+    @Bean
+    @ConditionalOnMissingBean(Serializer.class)
+    public Serializer serializer(@Value("#{aggregateRoots}")  Collection<Class<? extends EventSourcedAggregateRoot<?>>> aggregateRoots) {
+    	ObjectMapper mapper = new ObjectMapper();
+    	
+    	//
+    	// Configure json serialization for AggregateRoots by applying mixins so we don't have to up any json annotations into the AR
+    	//
+    	for (Class<?> aggregateRootType : aggregateRoots) {
+    		mapper.addMixInAnnotations(aggregateRootType, AggregateRootSnapshotMixIn.class);
+    	}
+    	
+    	//
+    	// Make jackson work with lombok @Value beans, @Value beans add @java.beans.ContructorProperties) to the generator code.
+    	// The ConstructorPropertiesAnnotationIntrospector tells jackson how to create the bean.
+    	//
+    	mapper.setAnnotationIntrospector(AnnotationIntrospectorPair.create(/*new IgnoreTransientAnnotationIntrospector()*/ new JacksonAnnotationIntrospector(), new ConstructorPropertiesAnnotationIntrospector()));
+    	
+    	// An event could have no properties at all, make sure jackson accepts empty beans.
+    	mapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+    	
+        return new JacksonSerializer(mapper);
+    }
+
     private String[] getPackagesToScan() {
         List<String> basePackages = AutoConfigurationPackages.get(this.beanFactory);
         return basePackages.toArray(new String[basePackages.size()]);
+    }
+    
+    @JsonAutoDetect(
+    		fieldVisibility=Visibility.ANY,
+    		getterVisibility=Visibility.NONE,
+    		isGetterVisibility=Visibility.NONE,
+    		setterVisibility=Visibility.NONE,
+    		creatorVisibility=Visibility.ANY
+    )
+    private static abstract class AggregateRootSnapshotMixIn {
+    	@JsonIgnore
+        private volatile EventContainer eventContainer;
+
+    	@JsonInclude(Include.NON_DEFAULT)
+        private boolean deleted;
     }
 }
