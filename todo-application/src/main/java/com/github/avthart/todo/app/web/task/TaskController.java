@@ -1,4 +1,4 @@
-package com.github.avthart.todo.app.rest.task;
+package com.github.avthart.todo.app.web.task;
 
 import java.security.Principal;
 
@@ -28,8 +28,8 @@ import com.github.avthart.todo.app.domain.task.commands.ModifyTaskTitleCommand;
 import com.github.avthart.todo.app.domain.task.commands.StarTaskCommand;
 import com.github.avthart.todo.app.query.task.TaskEntry;
 import com.github.avthart.todo.app.query.task.TaskEntryRepository;
-import com.github.avthart.todo.app.rest.task.requests.CreateTaskRequest;
-import com.github.avthart.todo.app.rest.task.requests.ModifyTitleRequest;
+import com.github.avthart.todo.app.web.task.requests.CreateTaskRequest;
+import com.github.avthart.todo.app.web.task.requests.ModifyTitleRequest;
 
 /**
  * @author albert

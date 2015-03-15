@@ -1,11 +1,11 @@
-package com.github.avthart.todo.app.rest.task.requests;
+package com.github.avthart.todo.app.web.task.requests;
 
 import javax.validation.constraints.NotNull;
 
 /**
  * @author albert
  */
-public class CreateTaskRequest {
+public class ModifyTitleRequest {
 	
 	@NotNull
 	private String title;

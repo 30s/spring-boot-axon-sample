@@ -1,4 +1,4 @@
-package com.github.avthart.todo.app.config;
+package com.github.avthart.todo.app.elasticsearch.config;
 
 import static org.elasticsearch.node.NodeBuilder.nodeBuilder;
 

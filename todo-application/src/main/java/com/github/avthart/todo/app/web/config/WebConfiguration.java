@@ -1,4 +1,4 @@
-package com.github.avthart.todo.app.config;
+package com.github.avthart.todo.app.web.config;
 
 import java.util.List;
 

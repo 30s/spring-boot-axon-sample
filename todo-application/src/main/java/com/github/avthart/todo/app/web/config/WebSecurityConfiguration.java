@@ -1,4 +1,4 @@
-package com.github.avthart.todo.app.config;
+package com.github.avthart.todo.app.web.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
