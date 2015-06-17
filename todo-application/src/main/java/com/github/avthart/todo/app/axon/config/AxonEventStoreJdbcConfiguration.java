@@ -53,7 +53,7 @@ public class AxonEventStoreJdbcConfiguration {
     @Value("${axon.eventstore.jdbc.batchSize:100}")
     private int batchSize;
     
-    @Value("${axon.eventstore.jdbc.createSchema:true}")
+    @Value("${axon.eventstore.jdbc.createSchema:false}")
     private boolean createSchema;
     
     @Bean
